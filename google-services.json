@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "785918978262",
+    "project_id": "renobasics-d33a1",
+    "storage_bucket": "renobasics-d33a1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:785918978262:android:7d365e84d1a03a17d08177",
+        "android_client_info": {
+          "package_name": "com.example.renobasic"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMfzx6rWO1TN3iLxKdX6waCpBB5vizdWc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
