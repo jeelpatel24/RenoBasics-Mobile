@@ -123,9 +123,9 @@ class _HomeownerMessagesScreenState extends State<HomeownerMessagesScreen> {
                                   backgroundColor:
                                       Colors.blue.withAlpha(25),
                                   child: Text(
-                                    contractorName
-                                        .substring(0, 1)
-                                        .toUpperCase(),
+                                    contractorName.isNotEmpty
+                                        ? contractorName.substring(0, 1).toUpperCase()
+                                        : '?',
                                     style: const TextStyle(
                                         color: Colors.blue,
                                         fontWeight: FontWeight.bold),

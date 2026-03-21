@@ -112,7 +112,7 @@ class _ChatScreenState extends State<ChatScreen> {
         content: text,
       );
       _scrollToBottom();
-      // Notify the recipient
+      // Notify the recipient (fire-and-forget — errors are silently ignored)
       if (widget.recipientUid.isNotEmpty) {
         NotificationService.createNotification(
           recipientUid: widget.recipientUid,
@@ -120,7 +120,7 @@ class _ChatScreenState extends State<ChatScreen> {
           title: 'New message from ${user.fullName}',
           message: text.length > 80 ? '${text.substring(0, 80)}…' : text,
           relatedId: widget.conversationId,
-        );
+        ).catchError((_) {});
       }
     } catch (e) {
       debugPrint('Failed to send: $e');

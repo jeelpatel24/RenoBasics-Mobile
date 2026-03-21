@@ -118,9 +118,9 @@ class _ContractorMessagesScreenState extends State<ContractorMessagesScreen> {
                                   backgroundColor:
                                       const Color(0xFFF97316).withAlpha(25),
                                   child: Text(
-                                    homeownerName
-                                        .substring(0, 1)
-                                        .toUpperCase(),
+                                    homeownerName.isNotEmpty
+                                        ? homeownerName.substring(0, 1).toUpperCase()
+                                        : '?',
                                     style: const TextStyle(
                                         color: Color(0xFFF97316),
                                         fontWeight: FontWeight.bold),
