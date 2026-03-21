@@ -9,6 +9,7 @@ import 'package:renobasic/utils/app_toast.dart';
 // import 'package:cloud_firestore/cloud_firestore.dart'; // TODO: enable when Firebase Storage is activated
 import 'package:renobasic/providers/auth_provider.dart';
 import 'package:renobasic/services/project_service.dart';
+import 'package:renobasic/services/validation_service.dart';
 
 class PostProjectScreen extends StatefulWidget {
   const PostProjectScreen({super.key});
@@ -343,6 +344,8 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
         TextFormField(
           controller: _streetAddress,
           decoration: _dec('Street Address'),
+          validator: (v) =>
+              (v == null || v.trim().isEmpty) ? 'Please enter a street address' : null,
         ),
         const SizedBox(height: 16),
 
@@ -373,14 +376,16 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
               .map((p) => DropdownMenuItem(value: p, child: Text(p)))
               .toList(),
           onChanged: (v) => setState(() => _selectedProvince = v),
+          validator: (v) => v == null ? 'Please select a province' : null,
         ),
         const SizedBox(height: 16),
 
         // Postal Code
         TextFormField(
           controller: _postalCode,
-          decoration: _dec('Postal Code'),
+          decoration: _dec('Postal Code').copyWith(hintText: 'e.g. M5V 2T6'),
           textCapitalization: TextCapitalization.characters,
+          validator: ValidationService.validatePostalCode,
         ),
         const SizedBox(height: 16),
 

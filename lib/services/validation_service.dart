@@ -52,4 +52,13 @@ class ValidationService {
     if (value != password) return 'Passwords do not match';
     return null;
   }
+
+  static String? validatePostalCode(String? value) {
+    if (value == null || value.trim().isEmpty) return 'Postal code is required';
+    final clean = value.replaceAll(RegExp(r'\s'), '').toUpperCase();
+    if (!RegExp(r'^[A-Z]\d[A-Z]\d[A-Z]\d$').hasMatch(clean)) {
+      return 'Enter a valid Canadian postal code (e.g. M5V 2T6)';
+    }
+    return null;
+  }
 }
