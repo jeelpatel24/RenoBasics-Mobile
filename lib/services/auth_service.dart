@@ -1,14 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:renobasic/models/user_model.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final DatabaseReference _db = FirebaseDatabase.instanceFor(
-    app: Firebase.app(),
-    databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-  ).ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
@@ -35,7 +31,7 @@ class AuthService {
       updatedAt: DateTime.now().toIso8601String(),
     );
 
-    await _db.child('users/${user.uid}').set(appUser.toMap());
+    await _firestore.collection('users').doc(user.uid).set(appUser.toMap());
     await user.sendEmailVerification();
 
     return appUser;
@@ -71,7 +67,7 @@ class AuthService {
       updatedAt: DateTime.now().toIso8601String(),
     );
 
-    await _db.child('users/${user.uid}').set(appUser.toMap());
+    await _firestore.collection('users').doc(user.uid).set(appUser.toMap());
     await user.sendEmailVerification();
 
     return appUser;
@@ -94,10 +90,14 @@ class AuthService {
   }
 
   Future<AppUser> getUserProfile(String uid) async {
-    final snapshot = await _db.child('users/$uid').get();
-    if (!snapshot.exists) {
+    final doc = await _firestore.collection('users').doc(uid).get();
+    if (!doc.exists) {
       throw Exception('User profile not found');
     }
-    return AppUser.fromMap(snapshot.value as Map<dynamic, dynamic>);
+    return AppUser.fromMap(doc.data()!);
+  }
+
+  Future<void> updateUserProfile(String uid, Map<String, dynamic> data) async {
+    await _firestore.collection('users').doc(uid).update(data);
   }
 }

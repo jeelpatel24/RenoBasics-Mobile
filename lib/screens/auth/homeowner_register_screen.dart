@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/utils/app_toast.dart';
 import 'package:renobasic/services/validation_service.dart';
 
 class HomeownerRegisterScreen extends StatefulWidget {
@@ -41,13 +41,13 @@ class _HomeownerRegisterScreenState extends State<HomeownerRegisterScreen> {
             fullName: _fullName.text.trim(),
             phone: _phone.text.trim(),
           );
-      Fluttertoast.showToast(msg: 'Account created! Check email for verification.');
-      if (mounted) Navigator.pushReplacementNamed(context, '/homeowner-dashboard');
+      AppToast.show(context, 'Account created! Check email for verification.');
+      if (mounted) Navigator.pushReplacementNamed(context, '/verify-email');
     } catch (e) {
       final msg = e.toString().contains('email-already-in-use')
           ? 'An account with this email already exists'
           : 'Registration failed. Please try again.';
-      Fluttertoast.showToast(msg: msg);
+      AppToast.show(context, msg, isError: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }

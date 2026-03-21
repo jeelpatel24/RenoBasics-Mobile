@@ -1,11 +1,7 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProjectService {
-  static DatabaseReference _db() => FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-      ).ref();
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Unlock a project for a contractor. Deducts credits, creates unlock record and transaction.
   /// Returns true on success, false on failure.
@@ -14,49 +10,61 @@ class ProjectService {
     try {
       final unlockKey = '${contractorUid}_$projectId';
 
+      if (creditCost <= 0) return false;
+
       // Check if already unlocked
-      final unlockSnap =
-          await _db().child('unlocks/$unlockKey').get();
-      if (unlockSnap.exists) return true; // already unlocked
+      final unlockDoc =
+          await _firestore.collection('unlocks').doc(unlockKey).get();
+      if (unlockDoc.exists) return true; // already unlocked
 
-      // Get current credit balance
-      final userSnap =
-          await _db().child('users/$contractorUid/creditBalance').get();
-      final currentBalance = (userSnap.value as int?) ?? 0;
+      // Use transaction for atomic operations
+      final result = await _firestore.runTransaction((transaction) async {
+        // Get current credit balance
+        final userDoc = await transaction.get(
+            _firestore.collection('users').doc(contractorUid));
+        final currentBalance = (userDoc.data()?['creditBalance'] as num?)?.toInt() ?? 0;
 
-      if (currentBalance < creditCost) return false;
+        if (currentBalance < creditCost) return false;
 
-      // Get homeownerUid from the project
-      final projectSnap =
-          await _db().child('projects/$projectId/homeownerUid').get();
-      final homeownerUid = projectSnap.value as String? ?? '';
+        // Get homeownerUid from the project
+        final projectDoc =
+            await transaction.get(_firestore.collection('projects').doc(projectId));
+        final homeownerUid = projectDoc.data()?['homeownerUid'] as String? ?? '';
 
-      final now = DateTime.now().toIso8601String();
-      final transactionRef = _db().child('transactions').push();
+        final now = DateTime.now();
+        final nowIso = now.toIso8601String();
 
-      // Multi-path update: deduct credits + create unlock + create transaction
-      final updates = <String, dynamic>{
-        'users/$contractorUid/creditBalance': currentBalance - creditCost,
-        'unlocks/$unlockKey': {
+        // Update user credit balance
+        transaction.update(_firestore.collection('users').doc(contractorUid),
+            {'creditBalance': currentBalance - creditCost});
+
+        // Create unlock record
+        transaction.set(
+            _firestore.collection('unlocks').doc(unlockKey),
+            {
+              'contractorUid': contractorUid,
+              'projectId': projectId,
+              'homeownerUid': homeownerUid,
+              'creditCost': creditCost,
+              'unlockedAt': nowIso,
+            });
+
+        // Create transaction record (pre-generate the ID so we can store it)
+        final txRef = _firestore.collection('transactions').doc();
+        transaction.set(txRef, {
+          'id': txRef.id,
           'contractorUid': contractorUid,
-          'projectId': projectId,
-          'homeownerUid': homeownerUid,
-          'creditCost': creditCost,
-          'unlockedAt': now,
-        },
-        'transactions/${transactionRef.key}': {
-          'id': transactionRef.key,
-          'uid': contractorUid,
+          'creditAmount': creditCost,
+          'cost': 0,
           'type': 'unlock',
-          'amount': -creditCost,
-          'description': 'Unlocked project $projectId',
-          'projectId': projectId,
-          'createdAt': now,
-        },
-      };
+          'relatedProjectId': projectId,
+          'timestamp': nowIso,
+        });
 
-      await _db().update(updates);
-      return true;
+        return true;
+      });
+
+      return result;
     } catch (_) {
       return false;
     }
@@ -65,19 +73,14 @@ class ProjectService {
   /// Get the set of project IDs this contractor has unlocked.
   static Future<Set<String>> getContractorUnlocks(String contractorUid) async {
     try {
-      final snap = await _db()
-          .child('unlocks')
-          .orderByChild('contractorUid')
-          .equalTo(contractorUid)
+      final query = await _firestore
+          .collection('unlocks')
+          .where('contractorUid', isEqualTo: contractorUid)
           .get();
 
-      if (!snap.exists || snap.value == null) return {};
-
-      final data = Map<String, dynamic>.from(snap.value as Map);
       final projectIds = <String>{};
-      for (final entry in data.values) {
-        final map = Map<String, dynamic>.from(entry as Map);
-        final pid = map['projectId'] as String?;
+      for (final doc in query.docs) {
+        final pid = doc.data()['projectId'] as String?;
         if (pid != null) projectIds.add(pid);
       }
       return projectIds;
@@ -90,12 +93,56 @@ class ProjectService {
   static Future<Map<String, dynamic>?> getProjectPrivateDetails(
       String projectId) async {
     try {
-      final snap =
-          await _db().child('projects/$projectId/privateDetails').get();
-      if (!snap.exists || snap.value == null) return null;
-      return Map<String, dynamic>.from(snap.value as Map);
+      final doc = await _firestore.collection('projects').doc(projectId).get();
+      if (!doc.exists) return null;
+      return doc.data()?['privateDetails'] as Map<String, dynamic>?;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Get all projects, ordered by creation date.
+  static Future<List<DocumentSnapshot>> getProjects() async {
+    try {
+      final query = await _firestore
+          .collection('projects')
+          .orderBy('createdAt', descending: true)
+          .get();
+      return query.docs;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Subscribe to open projects stream for real-time updates.
+  /// Only returns projects with status == 'open' (matches the marketplace filter).
+  static Stream<QuerySnapshot> subscribeToProjects() {
+    return _firestore
+        .collection('projects')
+        .where('status', isEqualTo: 'open')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  /// Create a new project.
+  static Future<String> createProject(Map<String, dynamic> data) async {
+    try {
+      final ref = await _firestore.collection('projects').add(data);
+      return ref.id;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  /// Update project status.
+  static Future<void> updateProjectStatus(String projectId, String status) async {
+    try {
+      await _firestore.collection('projects').doc(projectId).update({
+        'status': status,
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {
+      rethrow;
     }
   }
 }

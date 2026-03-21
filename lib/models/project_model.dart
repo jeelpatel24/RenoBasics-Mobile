@@ -44,12 +44,36 @@ class ProjectModel {
       ownershipStatus: map['ownershipStatus'] ?? '',
       budgetRange: map['budgetRange'] ?? '',
       budgetLabel: map['budgetLabel'] ?? '',
-      creditCost: map['creditCost'] ?? 0,
+      creditCost: (map['creditCost'] as num?)?.toInt() ?? 0,
       preferredStartDate: map['preferredStartDate'] ?? '',
       city: map['city'] ?? '',
       status: map['status'] ?? 'open',
       createdAt: map['createdAt'] ?? '',
       updatedAt: map['updatedAt'] ?? '',
+    );
+  }
+
+  factory ProjectModel.fromFirestore(Map<String, dynamic> map, String docId) {
+    return ProjectModel(
+      id: docId,
+      homeownerUid: map['homeownerUid'] ?? '',
+      projectTitle: map['projectTitle'] ?? '',
+      category: map['category'] ?? '',
+      categoryName: map['categoryName'] ?? '',
+      propertyType: map['propertyType'] ?? '',
+      ownershipStatus: map['ownershipStatus'] ?? '',
+      budgetRange: map['budgetRange'] ?? '',
+      budgetLabel: map['budgetLabel'] ?? '',
+      creditCost: (map['creditCost'] as num?)?.toInt() ?? 0,
+      preferredStartDate: map['preferredStartDate'] ?? '',
+      city: map['city'] ?? '',
+      status: map['status'] ?? 'open',
+      createdAt: map['createdAt'] is String
+          ? (map['createdAt'] as String)
+          : (map['createdAt']?.toDate() ?? DateTime.now()).toIso8601String(),
+      updatedAt: map['updatedAt'] is String
+          ? (map['updatedAt'] as String)
+          : (map['updatedAt']?.toDate() ?? DateTime.now()).toIso8601String(),
     );
   }
 

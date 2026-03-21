@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
 import 'package:renobasic/services/validation_service.dart';
+import 'package:renobasic/utils/app_toast.dart';
 
 class ContractorRegisterScreen extends StatefulWidget {
   const ContractorRegisterScreen({super.key});
@@ -50,13 +50,13 @@ class _ContractorRegisterScreenState extends State<ContractorRegisterScreen> {
             businessNumber: _bn.text.trim(),
             obrNumber: _obr.text.trim(),
           );
-      Fluttertoast.showToast(msg: 'Account created! Verification pending admin review.');
-      if (mounted) Navigator.pushReplacementNamed(context, '/contractor-dashboard');
+      AppToast.show(context, 'Account created! Verification pending admin review.');
+      if (mounted) Navigator.pushReplacementNamed(context, '/verify-email');
     } catch (e) {
       final msg = e.toString().contains('email-already-in-use')
           ? 'An account with this email already exists'
           : 'Registration failed. Please try again.';
-      Fluttertoast.showToast(msg: msg);
+      AppToast.show(context, msg, isError: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }

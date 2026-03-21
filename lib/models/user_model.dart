@@ -54,7 +54,7 @@ class AppUser {
       verificationStatus: map['verificationStatus'],
       verifiedDate: map['verifiedDate'],
       adminNotes: map['adminNotes'],
-      creditBalance: map['creditBalance'] ?? 0,
+      creditBalance: (map['creditBalance'] as num?)?.toInt() ?? 0,
     );
   }
 

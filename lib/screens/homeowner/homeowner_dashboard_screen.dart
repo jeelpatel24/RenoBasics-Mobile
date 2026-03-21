@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/screens/shared/notifications_screen.dart';
 
 class HomeownerDashboardScreen extends StatefulWidget {
   const HomeownerDashboardScreen({super.key});
@@ -16,66 +16,47 @@ class _HomeownerDashboardScreenState extends State<HomeownerDashboardScreen> {
   int _messages = 0;
   int _views = 0;
   int _bids = 0;
+  int _unreadNotifications = 0;
 
-  DatabaseReference _db() => FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-      ).ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
-    _loadStats();
+    // Defer until after first frame so AuthProvider is fully ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadStats());
   }
 
   Future<void> _loadStats() async {
     final uid = context.read<AuthProvider>().userProfile?.uid;
     if (uid == null) return;
+
+    if (!mounted) return;
+
     try {
       final results = await Future.wait([
-        _db().child('projects').get(),
-        _db().child('conversations').get(),
-        _db().child('unlocks').get(),
-        _db().child('bids').get(),
+        _firestore.collection('projects').where('homeownerUid', isEqualTo: uid).count().get(),
+        _firestore.collection('conversations').where('homeownerUid', isEqualTo: uid).count().get(),
+        _firestore.collection('unlocks').where('homeownerUid', isEqualTo: uid).count().get(),
+        _firestore.collection('bids').where('homeownerUid', isEqualTo: uid).count().get(),
       ]);
 
-      int projects = 0;
-      if (results[0].exists && results[0].value != null) {
-        final data = Map<String, dynamic>.from(results[0].value as Map);
-        for (final v in data.values) {
-          final p = Map<String, dynamic>.from(v as Map);
-          if (p['homeownerUid'] == uid) projects++;
-        }
-      }
+      final unreadSnap = await _firestore
+          .collection('notifications')
+          .where('recipientUid', isEqualTo: uid)
+          .where('read', isEqualTo: false)
+          .count()
+          .get();
 
-      int conversations = 0;
-      if (results[1].exists && results[1].value != null) {
-        final data = Map<String, dynamic>.from(results[1].value as Map);
-        for (final v in data.values) {
-          final c = Map<String, dynamic>.from(v as Map);
-          if (c['homeownerUid'] == uid) conversations++;
-        }
+      if (mounted) {
+        setState(() {
+          _projects = results[0].count ?? 0;
+          _messages = results[1].count ?? 0;
+          _views = results[2].count ?? 0;
+          _bids = results[3].count ?? 0;
+          _unreadNotifications = unreadSnap.count ?? 0;
+        });
       }
-
-      int views = 0;
-      if (results[2].exists && results[2].value != null) {
-        final data = Map<String, dynamic>.from(results[2].value as Map);
-        for (final v in data.values) {
-          final u = Map<String, dynamic>.from(v as Map);
-          if (u['homeownerUid'] == uid) views++;
-        }
-      }
-
-      int bids = 0;
-      if (results[3].exists && results[3].value != null) {
-        final data = Map<String, dynamic>.from(results[3].value as Map);
-        for (final v in data.values) {
-          final b = Map<String, dynamic>.from(v as Map);
-          if (b['homeownerUid'] == uid) bids++;
-        }
-      }
-
-      if (mounted) setState(() { _projects = projects; _messages = conversations; _views = views; _bids = bids; });
     } catch (e) {
       debugPrint('Error loading stats: $e');
     }
@@ -97,6 +78,40 @@ class _HomeownerDashboardScreenState extends State<HomeownerDashboardScreen> {
         backgroundColor: Colors.white,
         elevation: 0.5,
         actions: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none, color: Colors.black54),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                ).then((_) => _loadStats()),
+              ),
+              if (_unreadNotifications > 0)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF97316),
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Text(
+                      '$_unreadNotifications',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.black54),
             onPressed: () async {
@@ -106,11 +121,13 @@ class _HomeownerDashboardScreenState extends State<HomeownerDashboardScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: RefreshIndicator(
+        onRefresh: _loadStats,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Text('Welcome back, ${user?.fullName.split(' ').first ?? 'Homeowner'}!', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text('Manage your renovation projects', style: TextStyle(color: Colors.grey[600], fontSize: 15)),
@@ -131,6 +148,8 @@ class _HomeownerDashboardScreenState extends State<HomeownerDashboardScreen> {
             const Text('Quick Actions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             _actionTile(context, 'Post a New Project', 'Create a renovation project', Icons.add_circle, const Color(0xFFF97316), onTap: () => Navigator.pushNamed(context, '/post-project')),
+            const SizedBox(height: 8),
+            _actionTile(context, 'My Projects', 'View and manage your projects', Icons.assignment, Colors.teal, onTap: () => Navigator.pushNamed(context, '/homeowner-projects')),
             const SizedBox(height: 8),
             _actionTile(context, 'View Messages', 'Check contractor conversations', Icons.chat, Colors.blue, onTap: () => Navigator.pushNamed(context, '/homeowner-messages')),
             const SizedBox(height: 8),
@@ -161,7 +180,8 @@ class _HomeownerDashboardScreenState extends State<HomeownerDashboardScreen> {
                   if (_messages > 0) _activityRow(Icons.chat, 'You have $_messages active conversation${_messages != 1 ? 's' : ''}', Colors.blue),
                 ]),
               ),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -169,7 +189,7 @@ class _HomeownerDashboardScreenState extends State<HomeownerDashboardScreen> {
         onTap: (index) {
           switch (index) {
             case 0: break;
-            case 1: Navigator.pushNamed(context, '/post-project'); break;
+            case 1: Navigator.pushNamed(context, '/homeowner-projects'); break;
             case 2: Navigator.pushNamed(context, '/homeowner-messages'); break;
             case 3: Navigator.pushNamed(context, '/settings'); break;
           }

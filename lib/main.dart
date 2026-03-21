@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:renobasic/providers/auth_provider.dart';
 import 'package:renobasic/screens/auth/login_screen.dart';
 import 'package:renobasic/screens/auth/homeowner_register_screen.dart';
 import 'package:renobasic/screens/auth/contractor_register_screen.dart';
 import 'package:renobasic/screens/auth/reset_password_screen.dart';
+import 'package:renobasic/screens/auth/verify_email_screen.dart';
 import 'package:renobasic/screens/homeowner/homeowner_dashboard_screen.dart';
 import 'package:renobasic/screens/contractor/contractor_dashboard_screen.dart';
 import 'package:renobasic/screens/homeowner/post_project_screen.dart';
@@ -19,6 +21,11 @@ import 'package:renobasic/screens/homeowner/homeowner_messages_screen.dart';
 import 'package:renobasic/screens/shared/chat_screen.dart';
 import 'package:renobasic/screens/contractor/contractor_bids_screen.dart';
 import 'package:renobasic/screens/homeowner/homeowner_bids_screen.dart';
+import 'package:renobasic/screens/homeowner/homeowner_projects_screen.dart';
+import 'package:renobasic/screens/shared/notifications_screen.dart';
+import 'package:renobasic/screens/contractor/contractor_reviews_screen.dart';
+import 'package:renobasic/screens/homeowner/homeowner_project_detail_screen.dart';
+import 'package:renobasic/screens/contractor/contractor_analytics_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,7 +92,14 @@ class RenoBasicsApp extends StatelessWidget {
                   conversationId: args['conversationId'],
                   otherName: args['otherName'],
                   projectCategory: args['projectCategory'],
+                  recipientUid: args['recipientUid'] as String? ?? '',
                 ),
+              );
+            case '/homeowner-project-detail':
+              final args = settings.arguments as Map<String, dynamic>;
+              return MaterialPageRoute(
+                builder: (_) => HomeownerProjectDetailScreen(
+                    projectId: args['projectId']),
               );
             default:
               return null;
@@ -96,6 +110,7 @@ class RenoBasicsApp extends StatelessWidget {
           '/register-homeowner': (context) => const HomeownerRegisterScreen(),
           '/register-contractor': (context) => const ContractorRegisterScreen(),
           '/reset-password': (context) => const ResetPasswordScreen(),
+          '/verify-email': (context) => const VerifyEmailScreen(),
           '/homeowner-dashboard': (context) => const HomeownerDashboardScreen(),
           '/contractor-dashboard': (context) => const ContractorDashboardScreen(),
           '/post-project': (context) => const PostProjectScreen(),
@@ -106,6 +121,10 @@ class RenoBasicsApp extends StatelessWidget {
           '/homeowner-messages': (context) => const HomeownerMessagesScreen(),
           '/contractor-bids': (context) => const ContractorBidsScreen(),
           '/homeowner-bids': (context) => const HomeownerBidsScreen(),
+          '/homeowner-projects': (context) => const HomeownerProjectsScreen(),
+          '/notifications': (context) => const NotificationsScreen(),
+          '/contractor-reviews': (context) => const ContractorReviewsScreen(),
+          '/contractor-analytics': (context) => const ContractorAnalyticsScreen(),
         },
       ),
     );
@@ -140,6 +159,13 @@ class AuthGate extends StatelessWidget {
     }
 
     final user = authProvider.userProfile!;
+
+    // Enforce email verification for non-admin users on app restart
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (firebaseUser != null && !firebaseUser.emailVerified && !user.isAdmin) {
+      return const VerifyEmailScreen();
+    }
+
     if (user.isContractor) {
       return const ContractorDashboardScreen();
     }

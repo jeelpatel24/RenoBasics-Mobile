@@ -1,11 +1,7 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MessageService {
-  static DatabaseReference _db() => FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-      ).ref();
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Conversation ID format: {contractorUid}_{projectId}
   static String conversationId(String contractorUid, String projectId) =>
@@ -22,24 +18,24 @@ class MessageService {
     required String projectCategory,
   }) async {
     final convId = conversationId(contractorUid, projectId);
-    final convRef = _db().child('conversations/$convId');
+    final now = DateTime.now();
 
-    final snap = await convRef.get();
-    if (!snap.exists) {
-      final now = DateTime.now().toIso8601String();
-      await convRef.set({
-        'id': convId,
-        'contractorUid': contractorUid,
-        'homeownerUid': homeownerUid,
-        'projectId': projectId,
-        'contractorName': contractorName,
-        'homeownerName': homeownerName,
-        'projectCategory': projectCategory,
-        'lastMessage': '',
-        'lastMessageAt': now,
-        'createdAt': now,
-      });
-    }
+    await _firestore.collection('conversations').doc(convId).set(
+        {
+          'id': convId,
+          'contractorUid': contractorUid,
+          'homeownerUid': homeownerUid,
+          'projectId': projectId,
+          'contractorName': contractorName,
+          'homeownerName': homeownerName,
+          'projectCategory': projectCategory,
+          'lastMessage': '',
+          'lastMessageTimestamp': now.toIso8601String(),
+          'messageCount': 0,
+          'createdAt': now.toIso8601String(),
+        },
+        SetOptions(merge: true));
+
     return convId;
   }
 
@@ -50,46 +46,101 @@ class MessageService {
     required String senderName,
     required String content,
   }) async {
-    final now = DateTime.now().toIso8601String();
-    final msgRef =
-        _db().child('conversations/$conversationId/messages').push();
+    final now = DateTime.now();
 
-    final updates = <String, dynamic>{
-      'conversations/$conversationId/messages/${msgRef.key}': {
-        'id': msgRef.key,
-        'senderId': senderId,
-        'senderName': senderName,
-        'content': content,
-        'timestamp': now,
-        'read': false,
-      },
-      'conversations/$conversationId/lastMessage': content,
-      'conversations/$conversationId/lastMessageAt': now,
-    };
+    // Add message to messages subcollection
+    await _firestore
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .add({
+          'senderId': senderId,
+          'senderName': senderName,
+          'content': content,
+          'timestamp': now.toIso8601String(),
+          'read': false,
+        });
 
-    await _db().update(updates);
+    // Update conversation's last message and timestamp
+    final truncated = content.length > 80 ? '${content.substring(0, 80)}...' : content;
+    await _firestore.collection('conversations').doc(conversationId).update({
+      'lastMessage': truncated,
+      'lastMessageTimestamp': now.toIso8601String(),
+      'messageCount': FieldValue.increment(1),
+    });
   }
 
   /// Mark all messages in a conversation as read for the current user.
   static Future<void> markMessagesAsRead(
       String conversationId, String currentUserId) async {
-    final messagesSnap =
-        await _db().child('conversations/$conversationId/messages').get();
-    if (!messagesSnap.exists || messagesSnap.value == null) return;
+    final messagesQuery = await _firestore
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .where('senderId', isNotEqualTo: currentUserId)
+        .where('read', isEqualTo: false)
+        .get();
 
-    final messages = Map<String, dynamic>.from(messagesSnap.value as Map);
-    final updates = <String, dynamic>{};
+    if (messagesQuery.docs.isEmpty) return;
 
-    for (final entry in messages.entries) {
-      final msg = Map<String, dynamic>.from(entry.value as Map);
-      if (msg['senderId'] != currentUserId && msg['read'] != true) {
-        updates['conversations/$conversationId/messages/${entry.key}/read'] =
-            true;
+    final batch = _firestore.batch();
+    for (final doc in messagesQuery.docs) {
+      batch.update(doc.reference, {'read': true});
+    }
+    await batch.commit();
+  }
+
+  /// Subscribe to conversations for a user.
+  static Stream<QuerySnapshot> subscribeToConversations(
+      String uid, String role) {
+    final field = role == 'homeowner' ? 'homeownerUid' : 'contractorUid';
+    return _firestore
+        .collection('conversations')
+        .where(field, isEqualTo: uid)
+        .orderBy('lastMessageTimestamp', descending: true)
+        .snapshots();
+  }
+
+  /// Subscribe to messages in a conversation.
+  static Stream<QuerySnapshot> subscribeToMessages(String conversationId) {
+    return _firestore
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .orderBy('timestamp')
+        .snapshots();
+  }
+
+  /// Delete a conversation and all its messages.
+  static Future<void> deleteConversation(String conversationId) async {
+    const batchSize = 400;
+    while (true) {
+      final messages = await _firestore
+          .collection('conversations')
+          .doc(conversationId)
+          .collection('messages')
+          .limit(batchSize)
+          .get();
+      if (messages.docs.isEmpty) break;
+      final batch = _firestore.batch();
+      for (final doc in messages.docs) {
+        batch.delete(doc.reference);
       }
+      await batch.commit();
     }
+    await _firestore.collection('conversations').doc(conversationId).delete();
+  }
 
-    if (updates.isNotEmpty) {
-      await _db().update(updates);
-    }
+  /// Get unread message count for a conversation.
+  static Stream<int> getUnreadCount(
+      String conversationId, String currentUserId) {
+    return _firestore
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .where('senderId', isNotEqualTo: currentUserId)
+        .where('read', isEqualTo: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
   }
 }

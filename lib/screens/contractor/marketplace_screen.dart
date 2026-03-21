@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:renobasic/utils/app_toast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/services/notification_service.dart';
 import 'package:renobasic/services/project_service.dart';
 
 class MarketplaceScreen extends StatefulWidget {
@@ -14,15 +14,12 @@ class MarketplaceScreen extends StatefulWidget {
 }
 
 class _MarketplaceScreenState extends State<MarketplaceScreen> {
-  DatabaseReference _dbRef() {
-    return FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-    ).ref();
-  }
-
   List<String> _unlockedIds = [];
   bool _unlocking = false;
+  String _searchQuery = '';
+  String? _selectedCategory;
+  String _sortBy = 'newest'; // newest | credits_low | credits_high
+  final _searchController = TextEditingController();
 
   static const Map<String, IconData> _categoryIcons = {
     'kitchen': Icons.kitchen,
@@ -69,6 +66,35 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     _loadUnlocks();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> _applyFilters(List<Map<String, dynamic>> projects) {
+    var list = projects;
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      list = list.where((p) {
+        final title = (p['projectTitle'] as String? ?? '').toLowerCase();
+        final catName = (p['categoryName'] as String? ?? '').toLowerCase();
+        final cityVal = (p['city'] as String? ?? '').toLowerCase();
+        return title.contains(q) || catName.contains(q) || cityVal.contains(q);
+      }).toList();
+    }
+    if (_selectedCategory != null) {
+      list = list.where((p) => (p['category'] as String?) == _selectedCategory).toList();
+    }
+    if (_sortBy == 'credits_low') {
+      list.sort((a, b) => ((a['creditCost'] as num?)?.toInt() ?? 0).compareTo((b['creditCost'] as num?)?.toInt() ?? 0));
+    } else if (_sortBy == 'credits_high') {
+      list.sort((a, b) => ((b['creditCost'] as num?)?.toInt() ?? 0).compareTo((a['creditCost'] as num?)?.toInt() ?? 0));
+    }
+    // 'newest' keeps Firestore order (descending createdAt from stream)
+    return list;
+  }
+
   Future<void> _loadUnlocks() async {
     final user = context.read<AuthProvider>().userProfile;
     if (user == null) return;
@@ -85,16 +111,16 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     final user = auth.userProfile;
     if (user == null) return;
 
-    final creditCost = project['creditCost'] as int? ?? 0;
+    final creditCost = (project['creditCost'] as num?)?.toInt() ?? 0;
     final creditBalance = user.creditBalance;
     final projectId = project['id'] as String? ?? '';
 
     if (!user.isVerified) {
-      Fluttertoast.showToast(msg: 'Your account must be verified to unlock projects.');
+      AppToast.show(context, 'Your account must be verified to unlock projects.', isError: true);
       return;
     }
     if (creditBalance < creditCost) {
-      Fluttertoast.showToast(msg: 'Not enough credits. Please buy more credits.');
+      AppToast.show(context, 'Not enough credits. Please buy more credits.', isError: true);
       return;
     }
 
@@ -148,9 +174,21 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       await ProjectService.unlockProject(user.uid, projectId, creditCost);
       await auth.refreshProfile();
       setState(() => _unlockedIds.add(projectId));
-      Fluttertoast.showToast(msg: 'Project unlocked! You can now view full details.');
+      // Notify homeowner their project was unlocked (non-fatal)
+      final homeownerUid = project['homeownerUid'] as String? ?? '';
+      if (homeownerUid.isNotEmpty) {
+        await NotificationService.createNotification(
+          recipientUid: homeownerUid,
+          type: 'project_unlocked',
+          title: 'Your Project Was Viewed',
+          message:
+              '${user.fullName} unlocked your ${project['categoryName'] ?? 'project'} and can now view the full details.',
+          relatedId: projectId,
+        );
+      }
+      if (mounted) AppToast.show(context, 'Project unlocked! You can now view full details.');
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Failed to unlock project.');
+      if (mounted) AppToast.show(context, 'Failed to unlock project.', isError: true);
     } finally {
       if (mounted) setState(() => _unlocking = false);
     }
@@ -226,10 +264,103 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
             ),
           ),
 
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search by title, category, city…',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFFF97316), width: 2),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
+
+          // Filter Row
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Row(
+              children: [
+                // Category dropdown
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    initialValue: _selectedCategory,
+                    decoration: InputDecoration(
+                      labelText: 'Category',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      isDense: true,
+                    ),
+                    isExpanded: true,
+                    items: [
+                      const DropdownMenuItem<String?>(value: null, child: Text('All Categories')),
+                      ..._categoryIcons.keys.map((k) => DropdownMenuItem<String?>(
+                            value: k,
+                            child: Text(
+                              k[0].toUpperCase() + k.substring(1).replaceAll('_', ' '),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          )),
+                    ],
+                    onChanged: (v) => setState(() => _selectedCategory = v),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Sort dropdown
+                DropdownButtonHideUnderline(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: DropdownButton<String>(
+                      value: _sortBy,
+                      isDense: true,
+                      items: const [
+                        DropdownMenuItem(value: 'newest', child: Text('Newest')),
+                        DropdownMenuItem(value: 'credits_low', child: Text('Low Credits')),
+                        DropdownMenuItem(value: 'credits_high', child: Text('High Credits')),
+                      ],
+                      onChanged: (v) => setState(() => _sortBy = v!),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           // Projects List
           Expanded(
-            child: StreamBuilder<DatabaseEvent>(
-              stream: _dbRef().child('projects').orderByChild('status').equalTo('open').onValue,
+            child: StreamBuilder<QuerySnapshot>(
+              stream: ProjectService.subscribeToProjects(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
@@ -253,30 +384,55 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                   );
                 }
 
-                final data = snapshot.data?.snapshot.value;
-                if (data == null) {
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return _emptyState();
                 }
 
-                final projectsMap = Map<String, dynamic>.from(data as Map);
-                final projects = projectsMap.entries.toList()
-                  ..sort((a, b) {
-                    final aTime = (a.value as Map)['createdAt'] ?? '';
-                    final bTime = (b.value as Map)['createdAt'] ?? '';
-                    return bTime.toString().compareTo(aTime.toString());
-                  });
+                final rawProjects = snapshot.data!.docs.map((doc) {
+                  final p = doc.data() as Map<String, dynamic>;
+                  p['id'] = doc.id;
+                  return p;
+                }).toList();
+
+                final projects = _applyFilters(rawProjects);
 
                 if (projects.isEmpty) {
-                  return _emptyState();
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.search_off, size: 48, color: Colors.grey[300]),
+                        const SizedBox(height: 12),
+                        Text('No projects match your filters',
+                            style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 4),
+                        TextButton(
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                              _selectedCategory = null;
+                              _sortBy = 'newest';
+                            });
+                          },
+                          child: const Text('Clear filters', style: TextStyle(color: Color(0xFFF97316))),
+                        ),
+                      ],
+                    ),
+                  );
                 }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: projects.length,
-                  itemBuilder: (context, index) {
-                    final project = Map<String, dynamic>.from(projects[index].value as Map);
-                    return _projectCard(project, isVerified, user?.creditBalance ?? 0);
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    setState(() {});
                   },
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: projects.length,
+                    itemBuilder: (context, index) {
+                      return _projectCard(projects[index], isVerified, user?.creditBalance ?? 0);
+                    },
+                  ),
                 );
               },
             ),
@@ -315,7 +471,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     final projectTitle = project['projectTitle'] as String? ?? '';
     final propertyType = project['propertyType'] as String? ?? '';
     final preferredStartDate = project['preferredStartDate'] as String? ?? '';
-    final creditCost = project['creditCost'] as int? ?? 0;
+    final creditCost = (project['creditCost'] as num?)?.toInt() ?? 0;
     final projectId = project['id'] as String? ?? '';
     final icon = _categoryIcons[category] ?? Icons.build;
     final isUnlocked = _unlockedIds.contains(projectId);

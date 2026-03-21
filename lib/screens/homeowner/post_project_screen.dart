@@ -1,9 +1,14 @@
+// ignore_for_file: deprecated_member_use
+
+// import 'dart:io'; // TODO: enable when Firebase Storage is activated
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:renobasic/utils/app_toast.dart';
+// import 'package:image_picker/image_picker.dart'; // TODO: enable when Firebase Storage is activated
+// import 'package:firebase_storage/firebase_storage.dart'; // TODO: enable when Firebase Storage is activated
+// import 'package:cloud_firestore/cloud_firestore.dart'; // TODO: enable when Firebase Storage is activated
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/services/project_service.dart';
 
 class PostProjectScreen extends StatefulWidget {
   const PostProjectScreen({super.key});
@@ -45,6 +50,10 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
 
   // ── Section 5: Communication Preferences ──
   String _contactPreference = 'in_app';
+
+  // ── Section 6: File Uploads (disabled until Firebase Storage is activated) ──
+  // final List<XFile> _pickedImages = [];
+  // final _imagePicker = ImagePicker();
 
   // ── Static Data Maps ──
 
@@ -150,13 +159,6 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
     super.dispose();
   }
 
-  DatabaseReference _dbRef() {
-    return FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-    ).ref();
-  }
-
   Future<void> _submitProject() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -165,26 +167,7 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
       final user = context.read<AuthProvider>().userProfile;
       if (user == null) throw Exception('User not found');
 
-      final projectRef = _dbRef().child('projects').push();
-      final now = DateTime.now().toIso8601String();
-
-      final publicData = <String, dynamic>{
-        'id': projectRef.key,
-        'homeownerUid': user.uid,
-        'projectTitle': _projectTitle.text.trim(),
-        'category': _selectedCategory,
-        'categoryName': _categories[_selectedCategory],
-        'propertyType': _selectedPropertyType,
-        'ownershipStatus': _ownershipStatus,
-        'budgetRange': _selectedBudget,
-        'budgetLabel': _budgetRanges[_selectedBudget],
-        'creditCost': _creditCosts[_selectedBudget],
-        'preferredStartDate': _selectedStartDate,
-        'city': _city.text.trim(),
-        'status': 'open',
-        'createdAt': now,
-        'updatedAt': now,
-      };
+      final nowIso = DateTime.now().toIso8601String();
 
       final privateData = <String, dynamic>{
         'homeownerName': user.fullName,
@@ -206,13 +189,33 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
         'photos': <String>[],
       };
 
-      publicData['privateDetails'] = privateData;
-      await projectRef.set(publicData);
+      final publicData = <String, dynamic>{
+        'homeownerUid': user.uid,
+        'projectTitle': _projectTitle.text.trim(),
+        'category': _selectedCategory,
+        'categoryName': _categories[_selectedCategory],
+        'propertyType': _selectedPropertyType,
+        'ownershipStatus': _ownershipStatus,
+        'budgetRange': _selectedBudget,
+        'budgetLabel': _budgetRanges[_selectedBudget],
+        'creditCost': _creditCosts[_selectedBudget],
+        'preferredStartDate': _selectedStartDate,
+        'city': _city.text.trim(),
+        'status': 'open',
+        'privateDetails': privateData,
+        'createdAt': nowIso,
+        'updatedAt': nowIso,
+      };
 
-      Fluttertoast.showToast(msg: 'Project posted successfully!');
+      await ProjectService.createProject(publicData);
+
+      // TODO: image upload — enable when Firebase Storage is activated
+      // if (_pickedImages.isNotEmpty) { ... upload to storage ... }
+
+      if (mounted) AppToast.show(context, 'Project posted successfully!');
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Failed to post project. Please try again.');
+      if (mounted) AppToast.show(context, 'Failed to post project. Please try again.', isError: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -612,37 +615,32 @@ class _PostProjectScreenState extends State<PostProjectScreen> {
   }
 
   // ════════════════════════════════════════════════
-  // SECTION 6 — File Uploads (Placeholder)
+  // SECTION 6 — File Uploads (disabled until Firebase Storage is activated)
   // ════════════════════════════════════════════════
 
   Widget _buildSection6FileUploads() {
     return _sectionCard(
       icon: Icons.cloud_upload_outlined,
-      title: 'File Uploads',
+      title: 'Project Photos',
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+          padding: const EdgeInsets.symmetric(vertical: 20),
           decoration: BoxDecoration(
             color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid),
           ),
           child: Column(
             children: [
-              Icon(Icons.cloud_upload_outlined, size: 48, color: Colors.grey[400]),
-              const SizedBox(height: 12),
-              Text(
-                'File uploads coming in Iteration 2',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[500],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              Icon(Icons.cloud_upload_outlined, size: 32, color: Colors.grey[400]),
+              const SizedBox(height: 8),
+              Text('Photo uploads coming soon',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 14)),
             ],
           ),
         ),
+        // TODO: restore image picker when Firebase Storage is activated
       ],
     );
   }

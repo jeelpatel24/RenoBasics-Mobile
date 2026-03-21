@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/utils/app_toast.dart';
 import 'package:renobasic/services/project_service.dart';
 import 'package:renobasic/services/message_service.dart';
 
@@ -38,10 +37,7 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
     'flexible': 'Flexible',
   };
 
-  DatabaseReference _db() => FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-      ).ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
@@ -51,10 +47,11 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
 
   Future<void> _loadProject() async {
     try {
-      final snap = await _db().child('projects/${widget.projectId}').get();
-      if (snap.exists && snap.value != null) {
+      final doc = await _firestore.collection('projects').doc(widget.projectId).get();
+      if (doc.exists) {
         setState(() {
-          _project = Map<String, dynamic>.from(snap.value as Map);
+          _project = doc.data();
+          _project!['id'] = doc.id;
         });
         final details = await ProjectService.getProjectPrivateDetails(widget.projectId);
         setState(() => _privateDetails = details);
@@ -85,10 +82,11 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
           'conversationId': convId,
           'otherName': _privateDetails!['homeownerName'] ?? 'Homeowner',
           'projectCategory': _project!['categoryName'] ?? '',
+          'recipientUid': _project!['homeownerUid'] as String? ?? '',
         });
       }
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Failed to start conversation');
+      if (mounted) AppToast.show(context, 'Failed to start conversation', isError: true);
     }
   }
 
@@ -150,6 +148,67 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
 
                       // Private Details
                       if (_privateDetails != null) ...[
+                        // Photo Gallery
+                        if (_privateDetails!['photos'] is List &&
+                            (_privateDetails!['photos'] as List).isNotEmpty) ...[
+                          _sectionCard(
+                            icon: Icons.photo,
+                            title: 'Project Photos',
+                            child: SizedBox(
+                              height: 120,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: (_privateDetails!['photos'] as List).length,
+                                itemBuilder: (context, index) {
+                                  final photos = (_privateDetails!['photos'] as List);
+                                  final photoUrl = photos[index].toString();
+                                  return GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              _FullScreenImageViewer(
+                                                imageUrl: photoUrl,
+                                              ),
+                                        ),
+                                      );
+                                    },
+                                    child: Container(
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: BoxDecoration(
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                        color: Colors.grey[300],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                        child: Image.network(
+                                          photoUrl,
+                                          fit: BoxFit.cover,
+                                          width: 120,
+                                          height: 120,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                            return Container(
+                                              color: Colors.grey[300],
+                                              child: const Icon(
+                                                Icons.image_not_supported,
+                                                color: Colors.grey,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         // Full Description
                         _sectionCard(
                           icon: Icons.description,
@@ -162,7 +221,7 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
                         const SizedBox(height: 16),
 
                         // Scope of Work
-                        if (_privateDetails!['scopeOfWork'] != null &&
+                        if (_privateDetails!['scopeOfWork'] is List &&
                             (_privateDetails!['scopeOfWork'] as List).isNotEmpty)
                           ...[
                             _sectionCard(
@@ -365,7 +424,7 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
           Expanded(
             flex: 3,
             child: Text(
-              value[0].toUpperCase() + value.substring(1),
+              value.isEmpty ? '' : value[0].toUpperCase() + value.substring(1),
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
           ),
@@ -400,6 +459,44 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
           const SizedBox(height: 12),
           child,
         ],
+      ),
+    );
+  }
+}
+
+class _FullScreenImageViewer extends StatelessWidget {
+  final String imageUrl;
+  const _FullScreenImageViewer({required this.imageUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: Center(
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(
+            child: Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Colors.grey[900],
+                  child: const Icon(
+                    Icons.image_not_supported,
+                    color: Colors.grey,
+                    size: 48,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
       ),
     );
   }

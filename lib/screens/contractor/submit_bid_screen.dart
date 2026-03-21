@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/utils/app_toast.dart';
 import 'package:renobasic/services/bid_service.dart';
+import 'package:renobasic/services/notification_service.dart';
 
 class SubmitBidScreen extends StatefulWidget {
   final String projectId;
@@ -42,20 +43,21 @@ class _SubmitBidScreenState extends State<SubmitBidScreen> {
     // Validate
     for (final item in _items) {
       if ((item['description'] as String).trim().isEmpty || (item['cost'] as double) <= 0) {
-        Fluttertoast.showToast(msg: 'Please fill in all bid items with valid costs');
+        AppToast.show(context, 'Please fill in all bid items with valid costs', isError: true);
         return;
       }
     }
     if (_timelineController.text.trim().isEmpty) {
-      Fluttertoast.showToast(msg: 'Please provide an estimated timeline');
+      AppToast.show(context, 'Please provide an estimated timeline', isError: true);
       return;
     }
 
     setState(() => _submitting = true);
     try {
+      final homeownerUid = widget.project['homeownerUid'] as String? ?? '';
       await BidService.submitBid(
         contractorUid: user.uid,
-        homeownerUid: widget.project['homeownerUid'] ?? '',
+        homeownerUid: homeownerUid,
         projectId: widget.projectId,
         contractorName: user.fullName,
         projectCategory: widget.project['categoryName'] ?? '',
@@ -64,12 +66,23 @@ class _SubmitBidScreenState extends State<SubmitBidScreen> {
         estimatedTimeline: _timelineController.text.trim(),
         notes: _notesController.text.trim(),
       );
-      Fluttertoast.showToast(msg: 'Bid submitted successfully!');
+      // Notify homeowner of the new bid (non-fatal)
+      if (homeownerUid.isNotEmpty) {
+        await NotificationService.createNotification(
+          recipientUid: homeownerUid,
+          type: 'bid_received',
+          title: 'New Bid Received',
+          message:
+              '${user.fullName} submitted a bid of \$${_totalCost.toStringAsFixed(2)} for your ${widget.project['categoryName'] ?? 'project'}.',
+          relatedId: widget.projectId,
+        );
+      }
+      if (mounted) AppToast.show(context, 'Bid submitted successfully!');
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Failed to submit bid');
+      if (mounted) AppToast.show(context, 'Failed to submit bid', isError: true);
     } finally {
-      setState(() => _submitting = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 

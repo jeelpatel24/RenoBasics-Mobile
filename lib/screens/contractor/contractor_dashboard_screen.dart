@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/screens/shared/notifications_screen.dart';
 
 class ContractorDashboardScreen extends StatefulWidget {
   const ContractorDashboardScreen({super.key});
@@ -16,60 +16,47 @@ class _ContractorDashboardScreenState extends State<ContractorDashboardScreen> {
   int _bids = 0;
   int _messages = 0;
   int _acceptedBids = 0;
+  int _unreadNotifications = 0;
 
-  DatabaseReference _db() => FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-      ).ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
-    _loadStats();
+    // Defer until after first frame so AuthProvider is fully ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadStats());
   }
 
   Future<void> _loadStats() async {
     final uid = context.read<AuthProvider>().userProfile?.uid;
     if (uid == null) return;
+
+    if (!mounted) return;
+
     try {
       final results = await Future.wait([
-        _db().child('unlocks').get(),
-        _db().child('bids').get(),
-        _db().child('conversations').get(),
+        _firestore.collection('unlocks').where('contractorUid', isEqualTo: uid).count().get(),
+        _firestore.collection('bids').where('contractorUid', isEqualTo: uid).count().get(),
+        _firestore.collection('conversations').where('contractorUid', isEqualTo: uid).count().get(),
+        _firestore.collection('bids').where('contractorUid', isEqualTo: uid).where('status', isEqualTo: 'accepted').count().get(),
       ]);
 
-      int unlocked = 0;
-      if (results[0].exists && results[0].value != null) {
-        final data = Map<String, dynamic>.from(results[0].value as Map);
-        for (final v in data.values) {
-          final u = Map<String, dynamic>.from(v as Map);
-          if (u['contractorUid'] == uid) unlocked++;
-        }
-      }
+      final unreadSnap = await _firestore
+          .collection('notifications')
+          .where('recipientUid', isEqualTo: uid)
+          .where('read', isEqualTo: false)
+          .count()
+          .get();
 
-      int bids = 0;
-      int acceptedBids = 0;
-      if (results[1].exists && results[1].value != null) {
-        final data = Map<String, dynamic>.from(results[1].value as Map);
-        for (final v in data.values) {
-          final b = Map<String, dynamic>.from(v as Map);
-          if (b['contractorUid'] == uid) {
-            bids++;
-            if (b['status'] == 'accepted') acceptedBids++;
-          }
-        }
+      if (mounted) {
+        setState(() {
+          _unlocked = results[0].count ?? 0;
+          _bids = results[1].count ?? 0;
+          _messages = results[2].count ?? 0;
+          _acceptedBids = results[3].count ?? 0;
+          _unreadNotifications = unreadSnap.count ?? 0;
+        });
       }
-
-      int conversations = 0;
-      if (results[2].exists && results[2].value != null) {
-        final data = Map<String, dynamic>.from(results[2].value as Map);
-        for (final v in data.values) {
-          final c = Map<String, dynamic>.from(v as Map);
-          if (c['contractorUid'] == uid) conversations++;
-        }
-      }
-
-      if (mounted) setState(() { _unlocked = unlocked; _bids = bids; _messages = conversations; _acceptedBids = acceptedBids; });
     } catch (e) {
       debugPrint('Error loading stats: $e');
     }
@@ -93,6 +80,40 @@ class _ContractorDashboardScreenState extends State<ContractorDashboardScreen> {
         backgroundColor: Colors.white,
         elevation: 0.5,
         actions: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none, color: Colors.black54),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                ).then((_) => _loadStats()),
+              ),
+              if (_unreadNotifications > 0)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF97316),
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Text(
+                      '$_unreadNotifications',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.black54),
             onPressed: () async {
@@ -102,11 +123,13 @@ class _ContractorDashboardScreenState extends State<ContractorDashboardScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: RefreshIndicator(
+        onRefresh: _loadStats,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Text('Welcome, ${user?.fullName.split(' ').first ?? 'Contractor'}!', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text('Find renovation projects and grow your business', style: TextStyle(color: Colors.grey[600], fontSize: 15)),
@@ -121,6 +144,21 @@ class _ContractorDashboardScreenState extends State<ContractorDashboardScreen> {
                   const SizedBox(width: 10),
                   Expanded(child: Text('Your account is pending verification. You can browse but cannot unlock projects.', style: TextStyle(fontSize: 13, color: Colors.amber[800]))),
                 ]),
+              ),
+
+            if (isVerified && creditBalance <= 3)
+              GestureDetector(
+                onTap: () => Navigator.pushNamed(context, '/buy-credits'),
+                child: Container(
+                  width: double.infinity, padding: const EdgeInsets.all(14), margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade200)),
+                  child: Row(children: [
+                    Icon(Icons.credit_card_off, color: Colors.red[700], size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text('Low credit balance ($creditBalance credits remaining). Tap to buy more credits.', style: TextStyle(fontSize: 13, color: Colors.red[800]))),
+                    Icon(Icons.chevron_right, color: Colors.red[400], size: 18),
+                  ]),
+                ),
               ),
 
             GridView.count(
@@ -144,6 +182,8 @@ class _ContractorDashboardScreenState extends State<ContractorDashboardScreen> {
             _actionTile(context, 'My Bids', 'Track your submitted bids', Icons.description, Colors.blue, onTap: () => Navigator.pushNamed(context, '/contractor-bids')),
             const SizedBox(height: 8),
             _actionTile(context, 'Messages', 'Chat with homeowners', Icons.chat, Colors.purple, onTap: () => Navigator.pushNamed(context, '/contractor-messages')),
+            const SizedBox(height: 8),
+            _actionTile(context, 'Analytics', 'View bid stats and reviews', Icons.bar_chart, Colors.indigo, onTap: () => Navigator.pushNamed(context, '/contractor-analytics')),
             const SizedBox(height: 24),
 
             const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -170,7 +210,8 @@ class _ContractorDashboardScreenState extends State<ContractorDashboardScreen> {
                   if (_messages > 0) _activityRow(Icons.chat, 'You have $_messages active conversation${_messages != 1 ? 's' : ''}', Colors.green),
                 ]),
               ),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(

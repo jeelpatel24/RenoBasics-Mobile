@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:renobasic/utils/app_toast.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:renobasic/providers/auth_provider.dart';
 
 class BuyCreditsScreen extends StatefulWidget {
@@ -13,50 +13,71 @@ class BuyCreditsScreen extends StatefulWidget {
 }
 
 class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
-  static const List<Map<String, dynamic>> _packages = [
-    {'name': 'Starter', 'credits': 10, 'price': 49, 'perCredit': '4.90', 'badge': null},
-    {'name': 'Professional', 'credits': 25, 'price': 99, 'perCredit': '3.96', 'badge': 'POPULAR'},
-    {'name': 'Business', 'credits': 50, 'price': 179, 'perCredit': '3.58', 'badge': null},
-    {'name': 'Enterprise', 'credits': 100, 'price': 299, 'perCredit': '2.99', 'badge': null},
+  static const List<Map<String, dynamic>> _defaultPackages = [
+    {'name': 'Starter Pack', 'credits': 5, 'price': 29.99, 'perCredit': '6.00'},
+    {'name': 'Standard Pack', 'credits': 15, 'price': 79.99, 'perCredit': '5.33'},
+    {'name': 'Pro Pack', 'credits': 30, 'price': 149.99, 'perCredit': '5.00'},
+    {'name': 'Enterprise Pack', 'credits': 60, 'price': 279.99, 'perCredit': '4.67'},
   ];
 
+  List<Map<String, dynamic>> _packages = [];
   String? _buyingId;
-  List<Map<String, dynamic>> _transactions = [];
-  bool _txLoading = true;
-
-  DatabaseReference _db() => FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-      ).ref();
+  Future<List<DocumentSnapshot>>? _transactionsFuture;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   void initState() {
     super.initState();
-    _loadTransactions();
+    _packages = List.from(_defaultPackages);
+    _loadPackages();
   }
 
-  Future<void> _loadTransactions() async {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_transactionsFuture == null) {
+      _refreshTransactions();
+    }
+  }
+
+  void _refreshTransactions() {
     final uid = context.read<AuthProvider>().userProfile?.uid;
-    if (uid == null) return;
+    if (uid != null) {
+      setState(() {
+        _transactionsFuture = _firestore
+            .collection('transactions')
+            .where('contractorUid', isEqualTo: uid)
+            .orderBy('timestamp', descending: true)
+            .get()
+            .then((snap) => snap.docs);
+      });
+    }
+  }
+
+  Future<void> _loadPackages() async {
     try {
-      final snap = await _db().child('transactions').get();
-      if (snap.exists && snap.value != null) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        final txs = <Map<String, dynamic>>[];
-        data.forEach((key, value) {
-          final tx = Map<String, dynamic>.from(value as Map);
-          if (tx['contractorUid'] == uid) {
-            tx['id'] = key;
-            txs.add(tx);
-          }
-        });
-        txs.sort((a, b) => (b['timestamp'] ?? '').compareTo(a['timestamp'] ?? ''));
-        if (mounted) setState(() => _transactions = txs);
+      final snap = await _firestore.collection('settings').doc('creditPackages').get();
+      if (snap.exists) {
+        final data = snap.data()!;
+        final rawList = data['packages'] as List<dynamic>?;
+        if (rawList != null && rawList.isNotEmpty) {
+          final pkgs = rawList.map((p) {
+            final map = p as Map<String, dynamic>;
+            final credits = (map['credits'] as num).toInt();
+            final price = (map['price'] as num).toDouble();
+            final perCredit = credits > 0 ? (price / credits).toStringAsFixed(2) : '0.00';
+            return <String, dynamic>{
+              'name': map['label'] as String,
+              'credits': credits,
+              'price': price,
+              'perCredit': perCredit,
+            };
+          }).toList();
+          if (mounted) setState(() => _packages = pkgs);
+        }
       }
-    } catch (e) {
-      debugPrint('Error loading transactions: $e');
-    } finally {
-      if (mounted) setState(() => _txLoading = false);
+    } catch (_) {
+      // Fall back to defaults silently
     }
   }
 
@@ -95,28 +116,31 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
 
     setState(() => _buyingId = pkg['name']);
     try {
-      final balanceSnap = await _db().child('users/${user.uid}/creditBalance').get();
-      final currentBalance = (balanceSnap.value as int?) ?? 0;
-      final txRef = _db().child('transactions').push();
-      final now = DateTime.now().toIso8601String();
+      final now = DateTime.now();
+      final userRef = _firestore.collection('users').doc(user.uid);
 
-      await _db().update({
-        'users/${user.uid}/creditBalance': currentBalance + (pkg['credits'] as int),
-        'transactions/${txRef.key}': {
-          'id': txRef.key,
+      await _firestore.runTransaction((transaction) async {
+        final userDoc = await transaction.get(userRef);
+        final currentBalance = (userDoc.data()?['creditBalance'] as num?)?.toInt() ?? 0;
+
+        transaction.update(userRef, {
+          'creditBalance': currentBalance + (pkg['credits'] as int),
+        });
+
+        transaction.set(_firestore.collection('transactions').doc(), {
           'contractorUid': user.uid,
           'creditAmount': pkg['credits'],
           'cost': pkg['price'],
           'type': 'purchase',
-          'timestamp': now,
-        },
+          'timestamp': now.toIso8601String(),
+        });
       });
 
       await auth.refreshProfile();
-      Fluttertoast.showToast(msg: '${pkg['credits']} credits added!');
-      await _loadTransactions();
+      _refreshTransactions();
+      if (mounted) AppToast.show(context, '${pkg['credits']} credits added!');
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Failed to purchase credits');
+      if (mounted) AppToast.show(context, 'Failed to purchase credits', isError: true);
     } finally {
       if (mounted) setState(() => _buyingId = null);
     }
@@ -167,74 +191,214 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
             Text('Select a credit package that suits your needs', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
             const SizedBox(height: 16),
 
-            ..._packages.map((pkg) => _packageCard(pkg)),
+            ...List.generate(_packages.length, (i) => _packageCard(_packages[i], isPopular: i == 1)),
 
             const SizedBox(height: 28),
 
-            // Transaction History
-            const Text('Transaction History', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            if (_txLoading)
-              const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: Color(0xFFF97316))))
-            else if (_transactions.isEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-                child: Column(
+            // Credit Usage Chart + Transaction History (shared FutureBuilder)
+            FutureBuilder<List<DocumentSnapshot>>(
+              future: _transactionsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                      child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: CircularProgressIndicator(color: Color(0xFFF97316))));
+                }
+
+                final transactions = snapshot.data ?? [];
+                int totalPurchased = 0;
+                int totalSpent = 0;
+                for (final txDoc in transactions) {
+                  final txData = txDoc.data() as Map<String, dynamic>;
+                  final amount = (txData['creditAmount'] as num?)?.toInt() ?? 0;
+                  if (txData['type'] == 'purchase') { totalPurchased += amount; }
+                  else if (txData['type'] == 'unlock') { totalSpent += amount; }
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.receipt_long, size: 40, color: Colors.grey[300]),
-                    const SizedBox(height: 8),
-                    Text('No transactions yet', style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text('Purchase credits to see history here', style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+                    // Credit Usage Summary Card
+                    if (totalPurchased > 0 || totalSpent > 0) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Credit Usage Summary',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              height: 180,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: PieChart(
+                                      PieChartData(
+                                        sectionsSpace: 3,
+                                        centerSpaceRadius: 40,
+                                        sections: [
+                                          if (totalPurchased > 0)
+                                            PieChartSectionData(
+                                              value: totalPurchased.toDouble(),
+                                              color: const Color(0xFF22c55e),
+                                              title: '$totalPurchased',
+                                              radius: 52,
+                                              titleStyle: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white),
+                                            ),
+                                          if (totalSpent > 0)
+                                            PieChartSectionData(
+                                              value: totalSpent.toDouble(),
+                                              color: const Color(0xFFF97316),
+                                              title: '$totalSpent',
+                                              radius: 52,
+                                              titleStyle: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _legendItem(const Color(0xFF22c55e), 'Purchased', totalPurchased),
+                                      const SizedBox(height: 12),
+                                      _legendItem(const Color(0xFFF97316), 'Spent', totalSpent),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                    ],
+
+                    // Transaction History
+                    const Text('Transaction History',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    if (transactions.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(32),
+                        decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade200)),
+                        child: Column(
+                          children: [
+                            Icon(Icons.receipt_long, size: 40, color: Colors.grey[300]),
+                            const SizedBox(height: 8),
+                            Text('No transactions yet',
+                                style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 4),
+                            Text('Purchase credits to see history here',
+                                style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+                          ],
+                        ),
+                      )
+                    else
+                      Column(
+                        children: transactions.map((txDoc) {
+                          final txData = txDoc.data() as Map<String, dynamic>;
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade200)),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: txData['type'] == 'purchase'
+                                        ? Colors.green.withAlpha(25)
+                                        : const Color(0xFFF97316).withAlpha(25),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    txData['type'] == 'purchase'
+                                        ? Icons.arrow_upward
+                                        : Icons.arrow_downward,
+                                    color: txData['type'] == 'purchase'
+                                        ? Colors.green
+                                        : const Color(0xFFF97316),
+                                    size: 18,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                          txData['type'] == 'purchase'
+                                              ? 'Credit Purchase'
+                                              : 'Project Unlock',
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14)),
+                                      Text(
+                                          _formatDate(txData['timestamp']),
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey[400])),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  '${txData['type'] == 'purchase' ? '+' : '-'}${txData['creditAmount'] ?? 0}',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: txData['type'] == 'purchase'
+                                          ? Colors.green
+                                          : const Color(0xFFF97316)),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
                   ],
-                ),
-              )
-            else
-              ..._transactions.map((tx) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: tx['type'] == 'purchase' ? Colors.green.withAlpha(25) : const Color(0xFFF97316).withAlpha(25),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(
-                            tx['type'] == 'purchase' ? Icons.arrow_upward : Icons.arrow_downward,
-                            color: tx['type'] == 'purchase' ? Colors.green : const Color(0xFFF97316),
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(tx['type'] == 'purchase' ? 'Credit Purchase' : 'Project Unlock', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                              Text(_formatDate(tx['timestamp'] ?? ''), style: TextStyle(fontSize: 12, color: Colors.grey[400])),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          '${tx['type'] == 'purchase' ? '+' : '-'}${tx['creditAmount'] ?? 0}',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: tx['type'] == 'purchase' ? Colors.green : const Color(0xFFF97316)),
-                        ),
-                      ],
-                    ),
-                  )),
+                );
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _packageCard(Map<String, dynamic> pkg) {
-    final isPopular = pkg['badge'] != null;
+  Widget _legendItem(Color color, String label, int value) {
+    return Row(
+      children: [
+        Container(width: 14, height: 14, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+        const SizedBox(width: 8),
+        Text('$label: $value', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+      ],
+    );
+  }
+
+  Widget _packageCard(Map<String, dynamic> pkg, {bool isPopular = false}) {
     final isBuying = _buyingId == pkg['name'];
 
     return Container(
@@ -306,9 +470,14 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
     );
   }
 
-  String _formatDate(String iso) {
+  String _formatDate(dynamic value) {
     try {
-      final dt = DateTime.parse(iso);
+      DateTime dt;
+      if (value is Timestamp) {
+        dt = value.toDate();
+      } else {
+        dt = DateTime.parse(value.toString());
+      }
       final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       return '${months[dt.month - 1]} ${dt.day}, ${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     } catch (_) {

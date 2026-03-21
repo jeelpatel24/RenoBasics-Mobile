@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
 import 'package:renobasic/services/validation_service.dart';
+import 'package:renobasic/utils/app_toast.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -30,9 +30,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     try {
       await context.read<AuthProvider>().resetPassword(_emailController.text.trim());
       setState(() => _sent = true);
-      Fluttertoast.showToast(msg: 'Password reset email sent!');
+      AppToast.show(context, 'Password reset email sent!');
     } catch (_) {
-      Fluttertoast.showToast(msg: 'Failed to send reset email.');
+      AppToast.show(context, 'Failed to send reset email.', isError: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }

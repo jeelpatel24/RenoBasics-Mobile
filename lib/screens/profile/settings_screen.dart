@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:renobasic/providers/auth_provider.dart';
+import 'package:renobasic/utils/app_toast.dart';
+import 'package:renobasic/services/auth_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,6 +17,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _email = TextEditingController();
   final _phone = TextEditingController();
   final _companyName = TextEditingController();
+  final _contactName = TextEditingController();
   final _businessNumber = TextEditingController();
   final _obrNumber = TextEditingController();
   bool _loading = false;
@@ -36,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _phone.text = user.phone;
       if (user.isContractor) {
         _companyName.text = user.companyName ?? '';
+        _contactName.text = user.contactName ?? '';
         _businessNumber.text = user.businessNumber ?? '';
         _obrNumber.text = user.obrNumber ?? '';
       }
@@ -48,17 +49,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _email.dispose();
     _phone.dispose();
     _companyName.dispose();
+    _contactName.dispose();
     _businessNumber.dispose();
     _obrNumber.dispose();
     super.dispose();
   }
 
-  DatabaseReference _dbRef() {
-    return FirebaseDatabase.instanceFor(
-      app: Firebase.app(),
-      databaseURL: 'https://renobasics-d33a1-default-rtdb.firebaseio.com',
-    ).ref();
-  }
+  final AuthService _authService = AuthService();
 
   Future<void> _updateProfile() async {
     if (!_formKey.currentState!.validate()) return;
@@ -73,14 +70,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'phone': _phone.text.trim(),
         'updatedAt': DateTime.now().toIso8601String(),
       };
+      if (user.isContractor) {
+        updates['companyName'] = _companyName.text.trim();
+        updates['contactName'] = _contactName.text.trim();
+      }
 
-      await _dbRef().child('users/${user.uid}').update(updates);
+      await _authService.updateUserProfile(user.uid, updates);
       if (!mounted) return;
       await context.read<AuthProvider>().refreshProfile();
 
-      Fluttertoast.showToast(msg: 'Profile updated successfully!');
+      AppToast.show(context, 'Profile updated successfully!');
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Failed to update profile. Please try again.');
+      AppToast.show(context, 'Failed to update profile. Please try again.', isError: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -234,7 +235,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         controller: _phone,
                         decoration: _dec('Phone Number'),
                         keyboardType: TextInputType.phone,
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Phone number is required' : null,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Phone number is required';
+                          final digits = v.replaceAll(RegExp(r'\D'), '');
+                          if (digits.length != 10 && !(digits.length == 11 && digits[0] == '1')) {
+                            return 'Enter a valid 10-digit phone number';
+                          }
+                          return null;
+                        },
                       ),
 
                       // Contractor-only fields
@@ -242,11 +250,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 16),
                         TextFormField(
                           controller: _companyName,
-                          decoration: _dec('Company Name').copyWith(
-                            suffixIcon: const Icon(Icons.lock, size: 18, color: Colors.grey),
-                          ),
-                          readOnly: true,
-                          style: TextStyle(color: Colors.grey[600]),
+                          decoration: _dec('Company Name'),
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: _contactName,
+                          decoration: _dec('Contact Name'),
                         ),
                         const SizedBox(height: 16),
                         TextFormField(

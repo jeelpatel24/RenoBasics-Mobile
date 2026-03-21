@@ -17,8 +17,10 @@ class ValidationService {
 
   static String? validatePhone(String? value) {
     if (value == null || value.trim().isEmpty) return 'Phone is required';
-    final regex = RegExp(r'^[\d\s\-\+\(\)]{10,15}$');
-    if (!regex.hasMatch(value)) return 'Enter a valid phone number';
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length != 10 && !(digits.length == 11 && digits[0] == '1')) {
+      return 'Enter a valid 10-digit phone number';
+    }
     return null;
   }
 

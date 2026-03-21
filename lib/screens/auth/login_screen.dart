@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:provider/provider.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:renobasic/providers/auth_provider.dart';
 import 'package:renobasic/services/validation_service.dart';
+import 'package:renobasic/utils/app_toast.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -34,6 +35,11 @@ class _LoginScreenState extends State<LoginScreen> {
             _passwordController.text,
           );
       if (mounted) {
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null && !firebaseUser.emailVerified) {
+          Navigator.pushReplacementNamed(context, '/verify-email');
+          return;
+        }
         final user = context.read<AuthProvider>().userProfile;
         if (user != null) {
           if (user.isHomeowner) {
@@ -44,7 +50,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Invalid email or password');
+      AppToast.show(context, 'Invalid email or password', isError: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
