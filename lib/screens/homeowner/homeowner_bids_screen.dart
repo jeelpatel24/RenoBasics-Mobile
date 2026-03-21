@@ -204,12 +204,6 @@ class _HomeownerBidsScreenState extends State<HomeownerBidsScreen> {
                             final bidId = filtered[i].id;
                             final status =
                                 bid['status'] as String? ?? 'submitted';
-                            final items = bid['itemizedCosts'] != null
-                                ? List<Map<String, dynamic>>.from(
-                                    (bid['itemizedCosts'] as List).map(
-                                        (e) => Map<String, dynamic>.from(
-                                            e as Map)))
-                                : <Map<String, dynamic>>[];
                             final alreadyReviewed =
                                 _reviewedBidIds.contains(bidId);
 

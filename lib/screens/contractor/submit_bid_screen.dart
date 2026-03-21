@@ -114,10 +114,10 @@ class _SubmitBidScreenState extends State<SubmitBidScreen> {
       final homeownerUid = widget.project['homeownerUid'] as String? ?? '';
 
       // Build line items with subtotals
-      final lineItems = _items.map((item) {
+      final lineItems = _items.map<Map<String, dynamic>>((item) {
         final qty = item['qty'] as int? ?? 1;
         final unitPrice = item['unitPrice'] as double? ?? 0.0;
-        return {
+        return <String, dynamic>{
           'description': item['description'] as String,
           'qty': qty,
           'unitPrice': unitPrice,
@@ -127,9 +127,9 @@ class _SubmitBidScreenState extends State<SubmitBidScreen> {
 
       // Legacy itemizedCosts for backward compat
       final legacyCosts = lineItems
-          .map((item) => {
-                'description': item['description'],
-                'cost': item['subtotal'],
+          .map<Map<String, dynamic>>((item) => <String, dynamic>{
+                'description': item['description'] as String,
+                'cost': item['subtotal'] as double,
               })
           .toList();
 
