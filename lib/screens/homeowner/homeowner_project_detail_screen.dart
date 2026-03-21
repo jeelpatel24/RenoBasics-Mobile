@@ -692,11 +692,6 @@ class _HomeownerProjectDetailScreenState
                     final bidId = _bids[index].id;
                     final bidStatus =
                         bid['status'] as String? ?? 'submitted';
-                    final items = bid['itemizedCosts'] != null
-                        ? List<Map<String, dynamic>>.from(
-                            (bid['itemizedCosts'] as List).map(
-                                (e) => Map<String, dynamic>.from(e as Map)))
-                        : <Map<String, dynamic>>[];
                     final alreadyReviewed =
                         _reviewedBidIds.contains(bidId);
 
@@ -756,50 +751,7 @@ class _HomeownerProjectDetailScreenState
                             ],
                           ),
 
-                          if (items.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[50],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Column(
-                                children: items
-                                    .map((item) => Padding(
-                                          padding:
-                                              const EdgeInsets.symmetric(
-                                                  vertical: 2),
-                                          child: Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment
-                                                    .spaceBetween,
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  item['description'] ??
-                                                      '',
-                                                  style: TextStyle(
-                                                      fontSize: 13,
-                                                      color: Colors
-                                                          .grey[600]),
-                                                ),
-                                              ),
-                                              Text(
-                                                '\$${(item['cost'] as num? ?? 0).toStringAsFixed(0)}',
-                                                style: const TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight:
-                                                        FontWeight.w600),
-                                              ),
-                                            ],
-                                          ),
-                                        ))
-                                    .toList(),
-                              ),
-                            ),
-                          ],
+                          _buildBidInvoice(bid),
 
                           if ((bid['estimatedTimeline'] as String? ?? '')
                               .isNotEmpty) ...[
@@ -940,6 +892,250 @@ class _HomeownerProjectDetailScreenState
         Icon(icon, size: 14, color: color),
         const SizedBox(width: 4),
         Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+      ],
+    );
+  }
+
+  /// Renders the invoice view (new lineItems format) or legacy itemized costs.
+  Widget _buildBidInvoice(Map<String, dynamic> bid) {
+    const orange = Color(0xFFF97316);
+
+    final rawLineItems = bid['lineItems'];
+    final hasNewFormat =
+        rawLineItems != null && (rawLineItems as List).isNotEmpty;
+
+    if (hasNewFormat) {
+      final lineItems = List<Map<String, dynamic>>.from(
+          rawLineItems.map((e) => Map<String, dynamic>.from(e as Map)));
+      final subtotal = (bid['subtotal'] as num?)?.toDouble() ?? 0.0;
+      final taxRate = (bid['taxRate'] as num?)?.toInt() ?? 0;
+      final taxAmount = (bid['taxAmount'] as num?)?.toDouble() ?? 0.0;
+      final totalAmount = (bid['totalAmount'] as num?)?.toDouble() ??
+          (bid['totalCost'] as num?)?.toDouble() ?? 0.0;
+
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (bid['companyName'] != null ||
+                bid['contactEmail'] != null ||
+                bid['contactPhone'] != null)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: orange.withAlpha(20),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(10)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (bid['companyName'] != null &&
+                        (bid['companyName'] as String).isNotEmpty)
+                      Text(bid['companyName'] as String,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: Color(0xFFEA580C))),
+                    if (bid['contactName'] != null &&
+                        (bid['contactName'] as String).isNotEmpty)
+                      Text(bid['contactName'] as String,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey[700])),
+                    if (bid['contactEmail'] != null &&
+                        (bid['contactEmail'] as String).isNotEmpty)
+                      Text(bid['contactEmail'] as String,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey[600])),
+                    if (bid['contactPhone'] != null &&
+                        (bid['contactPhone'] as String).isNotEmpty)
+                      Text(bid['contactPhone'] as String,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey[600])),
+                  ],
+                ),
+              ),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              color: Colors.grey[100],
+              child: const Row(
+                children: [
+                  Expanded(
+                      child: Text('Description',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black54))),
+                  SizedBox(width: 6),
+                  SizedBox(
+                      width: 30,
+                      child: Text('Qty',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black54))),
+                  SizedBox(width: 6),
+                  SizedBox(
+                      width: 70,
+                      child: Text('Unit Price',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black54))),
+                  SizedBox(width: 6),
+                  SizedBox(
+                      width: 70,
+                      child: Text('Subtotal',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black54))),
+                ],
+              ),
+            ),
+            ...lineItems.map((item) {
+              final qty = (item['qty'] as num?)?.toInt() ?? 1;
+              final unitPrice =
+                  (item['unitPrice'] as num?)?.toDouble() ?? 0.0;
+              final sub =
+                  (item['subtotal'] as num?)?.toDouble() ?? qty * unitPrice;
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                    border: Border(
+                        bottom:
+                            BorderSide(color: Colors.grey.shade100))),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: Text(item['description'] ?? '',
+                            style: const TextStyle(fontSize: 13))),
+                    const SizedBox(width: 6),
+                    SizedBox(
+                        width: 30,
+                        child: Text('$qty',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.grey[700]))),
+                    const SizedBox(width: 6),
+                    SizedBox(
+                        width: 70,
+                        child: Text(
+                            '\$${unitPrice.toStringAsFixed(2)}',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.grey[700]))),
+                    const SizedBox(width: 6),
+                    SizedBox(
+                        width: 70,
+                        child: Text('\$${sub.toStringAsFixed(2)}',
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600))),
+                  ],
+                ),
+              );
+            }),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              child: Column(
+                children: [
+                  _invoiceSummaryRow('Subtotal', subtotal),
+                  if (taxRate > 0) ...[
+                    const SizedBox(height: 4),
+                    _invoiceSummaryRow('Tax ($taxRate%)', taxAmount,
+                        small: true),
+                  ],
+                  const Divider(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 14)),
+                      Text('\$${totalAmount.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: orange)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ── Legacy format ──────────────────────────────────────────────
+    final items = bid['itemizedCosts'] != null
+        ? List<Map<String, dynamic>>.from(
+            (bid['itemizedCosts'] as List)
+                .map((e) => Map<String, dynamic>.from(e as Map)))
+        : <Map<String, dynamic>>[];
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: items
+            .map((item) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item['description'] ?? '',
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey[600]),
+                        ),
+                      ),
+                      Text(
+                        '\$${(item['cost'] as num? ?? 0).toStringAsFixed(0)}',
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _invoiceSummaryRow(String label, double amount,
+      {bool small = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label,
+            style: TextStyle(
+                fontSize: small ? 12 : 13,
+                color: small ? Colors.grey[500] : Colors.grey[700])),
+        Text('\$${amount.toStringAsFixed(2)}',
+            style: TextStyle(
+                fontSize: small ? 12 : 13,
+                color: small ? Colors.grey[500] : Colors.grey[700])),
       ],
     );
   }
