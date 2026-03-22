@@ -48,18 +48,20 @@ class _ContractorProjectDetailScreenState extends State<ContractorProjectDetailS
   Future<void> _loadProject() async {
     try {
       final doc = await _firestore.collection('projects').doc(widget.projectId).get();
+      if (!mounted) return;
       if (doc.exists) {
         setState(() {
           _project = doc.data();
           _project!['id'] = doc.id;
         });
         final details = await ProjectService.getProjectPrivateDetails(widget.projectId);
+        if (!mounted) return;
         setState(() => _privateDetails = details);
       }
     } catch (e) {
       debugPrint('Error loading project: $e');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
